@@ -1,0 +1,6 @@
+{
+  "name": "Rook Studio — @byrook_tv Automated Video & Subtitle Suite",
+  "description": "AI-driven investigative documentary video generator, automated transition choreographer, and kinetic subtitle engine tailored to the youtube.com/@byrook_tv brand aesthetic.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
