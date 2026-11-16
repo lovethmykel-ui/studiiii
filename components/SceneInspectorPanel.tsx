@@ -7,16 +7,20 @@ import {
   buildSceneBrollPrompt,
   CAMERA_RIG_CATALOG,
   CameraMotionType,
+  extractSceneAudioCues,
   FINANCIAL_CHART_CATALOG,
   FinancialChartType,
   LENS_PRESET_CATALOG,
   LensPresetType,
   resolveSceneFinancialSeries,
+  SFX_PALETTE_CATALOG,
+  SoundEffectCueType,
   SubtitleWord,
   TRANSITION_CATALOG,
   TransitionType,
   VideoScene,
 } from '@/lib/video-engine';
+import { rookSoundEngine } from '@/lib/sound-engine';
 import {
   Activity,
   Aperture,
@@ -29,6 +33,7 @@ import {
   Sparkles,
   Subtitles,
   TrendingUp,
+  Volume2,
   Wand2,
 } from 'lucide-react';
 
@@ -392,6 +397,42 @@ export default function SceneInspectorPanel({
             />
           </div>
         )}
+
+        {/* Word-Synced Procedural SFX Cue Matrix (Moh4696/cinematic-skill + glebis/sound-effects) */}
+        <div className="mt-2.5 p-3 rounded-lg bg-[#080A0E] border border-white/10 flex flex-col gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div className="flex items-center gap-1.5 text-zinc-200 font-medium">
+              <Volume2 className="w-3.5 h-3.5 text-[#D4FF00]" />
+              <span>Word-Synced SFX Cue Palette (Click to audition)</span>
+            </div>
+            <span className="text-[11px] font-mono text-zinc-400">
+              {extractSceneAudioCues([scene], brand).length} auto-timed hits
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {(
+              Object.entries(SFX_PALETTE_CATALOG) as Array<
+                [
+                  SoundEffectCueType,
+                  (typeof SFX_PALETTE_CATALOG)[SoundEffectCueType],
+                ]
+              >
+            ).map(([sfxType, spec]) => (
+              <button
+                key={sfxType}
+                type="button"
+                onClick={() => rookSoundEngine.triggerSfx(sfxType, 0.85)}
+                title={spec.description}
+                className="press-scale px-2.5 py-1 rounded-md bg-[#12151E] border border-white/10 hover:border-[#D4FF00]/60 text-[11px] text-zinc-300 hover:text-[#D4FF00] transition-colors flex items-center gap-1.5 whitespace-nowrap"
+              >
+                <span className="font-mono text-[10px] text-[#D4FF00]">
+                  {spec.shortCode}
+                </span>
+                <span>{spec.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
       {/* Interactive Kinetic Subtitle Word Token Matrix */}

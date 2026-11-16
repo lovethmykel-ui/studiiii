@@ -3,6 +3,8 @@
 import React from 'react';
 import {
   BrandProfile,
+  FILM_LOOK_CATALOG,
+  FilmLookType,
   ROOK_DEFAULT_BRAND,
   SubtitleStylePreset,
 } from '@/lib/video-engine';
@@ -135,7 +137,37 @@ export default function BrandDnaPanel({
         <div className="flex flex-col gap-3">
           <div className="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
             <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
-            <span>Noir Forensic Color Grading</span>
+            <span>Film Look &amp; Forensic Color Grading</span>
+          </div>
+
+          <div>
+            <label
+              htmlFor="brand-film-look-select"
+              className="block text-xs text-slate-400 mb-1"
+            >
+              Documentary Film Look
+            </label>
+            <select
+              id="brand-film-look-select"
+              value={brand.filmLook || 'noir-slate'}
+              onChange={(e) =>
+                onUpdateBrand({ filmLook: e.target.value as FilmLookType })
+              }
+              className="w-full h-9 px-3 rounded-md bg-[#080C14] border border-slate-800 text-xs text-slate-100"
+            >
+              {(
+                Object.entries(FILM_LOOK_CATALOG) as Array<
+                  [FilmLookType, (typeof FILM_LOOK_CATALOG)[FilmLookType]]
+                >
+              ).map(([lookKey, spec]) => (
+                <option key={lookKey} value={lookKey}>
+                  {spec.label}
+                </option>
+              ))}
+            </select>
+            <p className="text-[11px] text-slate-500 mt-1">
+              {FILM_LOOK_CATALOG[brand.filmLook || 'noir-slate']?.description}
+            </p>
           </div>
 
           <div>

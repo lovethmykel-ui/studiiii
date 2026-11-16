@@ -18,6 +18,10 @@ import {
   buildFallbackNarrativeBeats,
   slugifyEpisodeFilename,
   buildBatchExportManifest,
+  FILM_LOOK_CATALOG,
+  SFX_PALETTE_CATALOG,
+  parseNumericMetric,
+  extractSceneAudioCues,
   INITIAL_ROOK_EPISODES,
   ROOK_DEFAULT_BRAND,
   VideoScene,
@@ -201,6 +205,38 @@ test('slugifyEpisodeFilename and buildBatchExportManifest create collision-free 
     assert.ok(videoBytes && videoBytes.length === 4, `Expected video bytes for ${entry.title}`);
   }
 });
+
+test('extractSceneAudioCues, parseNumericMetric, and FILM_LOOK_CATALOG support word-hit SFX and rolling counters', () => {
+  assert.ok(FILM_LOOK_CATALOG['evidence-wall']);
+  assert.ok(SFX_PALETTE_CATALOG['stamp-slam']);
+
+  const parsedDollar = parseNumericMetric('$4.2M');
+  assert.deepEqual(parsedDollar, {
+    prefix: '$',
+    targetNumber: 4.2,
+    decimals: 1,
+    suffix: 'M',
+  });
+
+  const parsedNodes = parseNumericMetric('48 NODES');
+  assert.deepEqual(parsedNodes, {
+    prefix: '',
+    targetNumber: 48,
+    decimals: 0,
+    suffix: ' NODES',
+  });
+
+  const cues = extractSceneAudioCues(INITIAL_ROOK_EPISODES[0].scenes, ROOK_DEFAULT_BRAND);
+  assert.ok(cues.length >= 10, 'Should extract open sub-drop, transition SFX, counter ticks, and word hits');
+  assert.equal(cues[0].type, 'sub-boom');
+  assert.ok(cues.some((c) => c.type === 'stamp-slam' && c.triggerWord === 'vanished'));
+  assert.ok(cues.some((c) => c.type === 'counter-tick'));
+
+  for (let i = 1; i < cues.length; i++) {
+    assert.ok(cues[i].timeSec >= cues[i - 1].timeSec, 'Audio cues must be chronologically ordered');
+  }
+});
+
 
 
 

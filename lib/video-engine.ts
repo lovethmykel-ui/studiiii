@@ -115,8 +115,41 @@ export interface BrandProfile {
   autoHighlightExploitTerms: boolean;
   watermarkEnabled: boolean;
   minimalistCanvasHud: boolean;
+  filmLook?: FilmLookType;
   targetWpmRange: [number, number];
   defaultVoice: 'Charon' | 'Fenrir' | 'Kore' | 'Puck' | 'Zephyr';
+}
+
+export type FilmLookType =
+  | 'noir-slate'
+  | 'evidence-wall'
+  | 'blueprint'
+  | 'charcoal-studio';
+
+export type SoundEffectCueType =
+  | 'stamp-slam'
+  | 'highlighter-swipe'
+  | 'whoosh-pan'
+  | 'redaction-glitch'
+  | 'evidence-flash'
+  | 'counter-tick'
+  | 'sub-boom';
+
+export interface AudioCueEvent {
+  id: string;
+  timeSec: number;
+  type: SoundEffectCueType;
+  label: string;
+  intensity: number; // 0..1
+  sceneId: string;
+  triggerWord?: string;
+}
+
+export interface ParsedMetricNumber {
+  prefix: string;
+  targetNumber: number;
+  decimals: number;
+  suffix: string;
 }
 
 export interface EpisodeProject {
@@ -180,6 +213,7 @@ export const ROOK_DEFAULT_BRAND: BrandProfile = {
   autoHighlightExploitTerms: true,
   watermarkEnabled: false,
   minimalistCanvasHud: true,
+  filmLook: 'noir-slate',
   targetWpmRange: [120, 175],
   defaultVoice: 'Charon',
 };
@@ -1349,5 +1383,223 @@ export function buildBatchExportManifest(
     };
   });
 }
+
+export const FILM_LOOK_CATALOG: Record<
+  FilmLookType,
+  {
+    label: string;
+    description: string;
+    boardHex: string;
+    threadHex: string;
+    stampHex: string;
+  }
+> = {
+  'noir-slate': {
+    label: 'Noir Forensic Slate',
+    description:
+      'Signature @byrook_tv obsidian grade with cool slate vignette and tactical gridlines.',
+    boardHex: '#090D16',
+    threadHex: 'rgba(56, 189, 248, 0.25)',
+    stampHex: '#EF4444',
+  },
+  'evidence-wall': {
+    label: 'Evidence Wall & Red Thread',
+    description:
+      'Tactile investigative archive board with pinned corner marks, red yarn threads, and warm shadows.',
+    boardHex: '#12100E',
+    threadHex: 'rgba(239, 68, 68, 0.55)',
+    stampHex: '#EF4444',
+  },
+  blueprint: {
+    label: 'Forensic Blueprint Schematic',
+    description:
+      'Precision cyan vector schematic grid with engineering coordinate callouts.',
+    boardHex: '#061224',
+    threadHex: 'rgba(56, 189, 248, 0.4)',
+    stampHex: '#38BDF8',
+  },
+  'charcoal-studio': {
+    label: 'Charcoal Editorial Studio',
+    description:
+      'Ultra-clean dark studio backdrop with subtle warm amber rim lighting.',
+    boardHex: '#0D0E12',
+    threadHex: 'rgba(245, 158, 11, 0.3)',
+    stampHex: '#D4FF00',
+  },
+};
+
+export const SFX_PALETTE_CATALOG: Record<
+  SoundEffectCueType,
+  {
+    label: string;
+    shortCode: string;
+    character: string;
+    description: string;
+  }
+> = {
+  'stamp-slam': {
+    label: 'Forensic Stamp Slam',
+    shortCode: 'STAMP',
+    character: 'Heavy sub-thud + crisp document impact',
+    description:
+      'Fires on the exact millisecond of crimson exploit verbs (drained, vanished, breached).',
+  },
+  'highlighter-swipe': {
+    label: 'Marker Highlighter Swipe',
+    shortCode: 'SWIPE',
+    character: 'Filtered resonant noise brush sweep',
+    description:
+      'Audible dry-marker swipe timed to financial figures and forensic telemetry callouts.',
+  },
+  'whoosh-pan': {
+    label: 'Cinematic Whip Whoosh',
+    shortCode: 'WHOOSH',
+    character: 'Stereo bandpass air sweep',
+    description:
+      'Synchronizes physical camera whip-pans and zoom-through transitions across scenes.',
+  },
+  'redaction-glitch': {
+    label: 'Classified Redaction Cut',
+    shortCode: 'GLITCH',
+    character: 'Short metallic relay snap + digital jitter',
+    description:
+      'Punctuates black-bar redaction transitions and classified dossier reveals.',
+  },
+  'evidence-flash': {
+    label: 'Microfiche Shutter Flash',
+    shortCode: 'SHUTTER',
+    character: 'Crisp mechanical shutter transient',
+    description:
+      'Pairs with exposure flash transitions and verified court filing stamps.',
+  },
+  'counter-tick': {
+    label: 'Telemetry Counter Tick',
+    shortCode: 'TICK',
+    character: 'Minimalist wooden/digital ledger click',
+    description:
+      'Rapid micro-clicks synchronized to rolling financial numbers counting up on screen.',
+  },
+  'sub-boom': {
+    label: 'Investigative Sub Drop',
+    shortCode: 'BOOM',
+    character: 'Deep 55Hz cinematic tension swell',
+    description:
+      'Opens Act I hooks and anchors major investigative revelations without clutter.',
+  },
+};
+
+/**
+ * Parses a key financial metric string (e.g. "$4.2M", "1.4s", "48 NODES", "20.0%")
+ * so the canvas can animate a word-synced rolling counter (Moh4696/cinematic-skill pattern).
+ */
+export function parseNumericMetric(value: string): ParsedMetricNumber | null {
+  const match = value.trim().match(/^([^0-9.-]*)(-?\d+(?:\.\d+)?)(.*)$/);
+  if (!match) return null;
+  const [, prefix, numStr, suffix] = match;
+  const targetNumber = parseFloat(numStr);
+  if (!Number.isFinite(targetNumber)) return null;
+  const dotIdx = numStr.indexOf('.');
+  const decimals = dotIdx >= 0 ? numStr.length - dotIdx - 1 : 0;
+  return { prefix, targetNumber, decimals, suffix };
+}
+
+/**
+ * Automatically extracts a chronological cue sheet of procedural sound effects
+ * from scene transitions, spoken keyword hits (word-level synchronization), and rolling metrics.
+ */
+export function extractSceneAudioCues(
+  scenes: VideoScene[],
+  brand: Pick<BrandProfile, 'autoHighlightNumbers' | 'autoHighlightExploitTerms'> = ROOK_DEFAULT_BRAND
+): AudioCueEvent[] {
+  const slots = buildTimelineSlots(scenes, brand);
+  const cues: AudioCueEvent[] = [];
+
+  slots.forEach((slot, idx) => {
+    const sc = slot.scene;
+
+    // 1. Scene opening / transition SFX
+    if (idx === 0) {
+      cues.push({
+        id: `cue-open-${sc.id}`,
+        timeSec: Number((slot.startSec + 0.05).toFixed(3)),
+        type: 'sub-boom',
+        label: 'Cold Open Sub Drop',
+        intensity: 0.85,
+        sceneId: sc.id,
+      });
+    } else {
+      const transMap: Record<TransitionType, SoundEffectCueType> = {
+        'forensic-zoom': 'whoosh-pan',
+        'whip-pan': 'whoosh-pan',
+        'redaction-glitch': 'redaction-glitch',
+        'evidence-flash': 'evidence-flash',
+        'cross-dissolve': 'highlighter-swipe',
+      };
+      cues.push({
+        id: `cue-trans-${sc.id}`,
+        timeSec: Number(slot.startSec.toFixed(3)),
+        type: transMap[sc.transitionIn] || 'whoosh-pan',
+        label: TRANSITION_CATALOG[sc.transitionIn]?.label || 'Transition Cut',
+        intensity: 0.8,
+        sceneId: sc.id,
+      });
+    }
+
+    // 2. Rolling metric counter ticks near start of shot when keyMetricValue is numeric
+    if (parseNumericMetric(sc.keyMetricValue)) {
+      const tickOffsets = [0.35, 0.55, 0.75];
+      tickOffsets.forEach((off, tIdx) => {
+        if (off < sc.durationSec) {
+          cues.push({
+            id: `cue-tick-${sc.id}-${tIdx}`,
+            timeSec: Number((slot.startSec + off).toFixed(3)),
+            type: 'counter-tick',
+            label: `${sc.keyMetricLabel}: ${sc.keyMetricValue}`,
+            intensity: 0.55,
+            sceneId: sc.id,
+          });
+        }
+      });
+    }
+
+    // 3. Word-level hit SFX ("Hits land on the spoken word")
+    let stampCountInScene = 0;
+    let swipeCountInScene = 0;
+
+    for (const w of slot.words) {
+      if (!w.isHighlighted) continue;
+
+      if (w.highlightTone === 'crimson' && stampCountInScene < 2) {
+        cues.push({
+          id: `cue-word-stamp-${sc.id}-${w.startSec}`,
+          timeSec: w.startSec,
+          type: 'stamp-slam',
+          label: `Stamp Hit: "${w.cleanWord.toUpperCase()}"`,
+          intensity: 0.9,
+          sceneId: sc.id,
+          triggerWord: w.cleanWord,
+        });
+        stampCountInScene++;
+      } else if (
+        (w.highlightTone === 'amber' || w.highlightTone === 'cyan') &&
+        swipeCountInScene < 2
+      ) {
+        cues.push({
+          id: `cue-word-swipe-${sc.id}-${w.startSec}`,
+          timeSec: w.startSec,
+          type: 'highlighter-swipe',
+          label: `Highlight Swipe: "${w.cleanWord}"`,
+          intensity: 0.7,
+          sceneId: sc.id,
+          triggerWord: w.cleanWord,
+        });
+        swipeCountInScene++;
+      }
+    }
+  });
+
+  return cues.sort((a, b) => a.timeSec - b.timeSec);
+}
+
 
 

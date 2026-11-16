@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
 import {
+  AudioCueEvent,
   BrandProfile,
   buildTimelineSlots,
   calculateTimelineMetrics,
@@ -10,6 +11,7 @@ import {
   CameraMotionType,
   EpisodeProject,
   exportToSrt,
+  extractSceneAudioCues,
   formatStudioTimecode,
   INITIAL_ROOK_EPISODES,
   LENS_PRESET_CATALOG,
@@ -19,6 +21,7 @@ import {
   TransitionType,
   VideoScene,
 } from '@/lib/video-engine';
+import { rookSoundEngine } from '@/lib/sound-engine';
 import RookCanvasPlayer from '@/components/RookCanvasPlayer';
 import TimelineScrubber from '@/components/TimelineScrubber';
 import SceneInspectorPanel from '@/components/SceneInspectorPanel';
@@ -33,6 +36,7 @@ import {
   FolderOpen,
   Layers,
   Loader2,
+  Music,
   Pause,
   Play,
   Plus,
@@ -43,6 +47,8 @@ import {
   Sliders,
   Sparkles,
   Video,
+  Volume2,
+  VolumeX,
   Wand2,
 } from 'lucide-react';
 
@@ -91,9 +97,16 @@ export default function RookStudioPage() {
   const [exportBanner, setExportBanner] = useState<string>('');
   const [showSrtModal, setShowSrtModal] = useState<boolean>(false);
 
+  // Synchronized Audio, Procedural SFX & Ducked Score states
+  const [isAudioMuted, setIsAudioMuted] = useState<boolean>(false);
+  const [isAmbientEnabled, setIsAmbientEnabled] = useState<boolean>(true);
+  const [activeCueLabel, setActiveCueLabel] = useState<string>('');
+
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rafRef = useRef<number | null>(null);
   const lastFrameTimeRef = useRef<number>(0);
+  const firedCueIdsRef = useRef<Set<string>>(new Set());
+  const prevPlayTimeRef = useRef<number>(-1);
 
   const activeEpisode = useMemo(
     () =>
@@ -126,6 +139,76 @@ export default function RookStudioPage() {
     () => exportToSrt(activeEpisode.scenes, 5),
     [activeEpisode.scenes]
   );
+
+  const audioCues: AudioCueEvent[] = useMemo(
+    () => extractSceneAudioCues(activeEpisode.scenes, brand),
+    [activeEpisode.scenes, brand]
+  );
+
+  // Sync procedural SFX, voiceover audio tracks, and ambient noir score during playback
+  useEffect(() => {
+    rookSoundEngine.setMuted(isAudioMuted);
+  }, [isAudioMuted]);
+
+  useEffect(() => {
+    if (!isPlaying || isAudioMuted) {
+      rookSoundEngine.stopVoiceover();
+      rookSoundEngine.stopAmbient();
+      if (!isPlaying) {
+        firedCueIdsRef.current.clear();
+        prevPlayTimeRef.current = -1;
+      }
+      return;
+    }
+
+    if (isAmbientEnabled) {
+      rookSoundEngine.setAmbientEnabled(true);
+    } else {
+      rookSoundEngine.stopAmbient();
+    }
+
+    // Play current scene's narrator voiceover WAV if synthesized
+    const currentScene = playbackState.activeSlot?.scene;
+    if (currentScene?.audioDataUrl) {
+      void rookSoundEngine.playSceneVoiceover(
+        currentScene.id,
+        currentScene.audioDataUrl,
+        playbackState.sceneLocalTimeSec
+      );
+    }
+
+    // Fire procedural SFX cues cleanly as playhead crosses each cue timestamp
+    const prevT =
+      prevPlayTimeRef.current < 0 || prevPlayTimeRef.current > currentTimeSec
+        ? Math.max(0, currentTimeSec - 0.1)
+        : prevPlayTimeRef.current;
+
+    if (prevPlayTimeRef.current > currentTimeSec) {
+      firedCueIdsRef.current.clear();
+    }
+
+    for (const cue of audioCues) {
+      if (
+        !firedCueIdsRef.current.has(cue.id) &&
+        cue.timeSec >= prevT &&
+        cue.timeSec <= currentTimeSec + 0.04
+      ) {
+        firedCueIdsRef.current.add(cue.id);
+        rookSoundEngine.triggerSfx(cue.type, cue.intensity);
+        setActiveCueLabel(cue.label);
+      }
+    }
+
+    prevPlayTimeRef.current = currentTimeSec;
+  }, [
+    isPlaying,
+    isAudioMuted,
+    isAmbientEnabled,
+    currentTimeSec,
+    audioCues,
+    playbackState.activeSlot,
+    playbackState.sceneLocalTimeSec,
+  ]);
 
   // 60fps requestAnimationFrame playback loop
   useEffect(() => {
@@ -290,48 +373,66 @@ export default function RookStudioPage() {
         setCurrentTimeSec(0);
         setTopicInput('');
 
-        // Stage 3: Automatically synthesize narrator voiceover for Scene 1 and start video playback
+        // Stage 3: Synthesize corresponding narrator voiceover for ALL chapters + start audio-synced video playback
         setPipelineStep('producing');
         setGenerationStatus(
-          `Stage 3/3 · Synthesizing ${brand.defaultVoice} documentary voiceover & starting video playback...`
+          `Stage 3/3 · Synthesizing ${brand.defaultVoice} documentary voiceover across all ${newEp.scenes.length} chapters & arming word-synced SFX...`
         );
 
-        if (firstScene) {
-          try {
-            const ttsRes = await fetch('/api/rook/tts', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                text: firstScene.narration,
-                voiceName: brand.defaultVoice,
-                durationSec: firstScene.durationSec,
-              }),
-            });
-            const ttsData = await ttsRes.json();
-            if (ttsData.audioDataUrl) {
-              setEpisodes((prev) =>
-                prev.map((ep) =>
-                  ep.id === newEp.id
-                    ? {
-                        ...ep,
-                        scenes: ep.scenes.map((s, idx) =>
-                          idx === 0
-                            ? { ...s, audioDataUrl: ttsData.audioDataUrl }
-                            : s
-                        ),
-                      }
-                    : ep
-                )
-              );
-            }
-          } catch {
-            // Continue playback even if TTS request is skipped
+        try {
+          const ttsResults = await Promise.all(
+            newEp.scenes.map(async (sceneItem) => {
+              try {
+                const ttsRes = await fetch('/api/rook/tts', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    text: sceneItem.narration,
+                    voiceName: brand.defaultVoice,
+                    durationSec: sceneItem.durationSec,
+                  }),
+                });
+                const ttsData = await ttsRes.json();
+                return {
+                  sceneId: sceneItem.id,
+                  audioDataUrl: ttsData.audioDataUrl as string | undefined,
+                };
+              } catch {
+                return { sceneId: sceneItem.id, audioDataUrl: undefined };
+              }
+            })
+          );
+
+          const audioMap = new Map(
+            ttsResults
+              .filter((r) => Boolean(r.audioDataUrl))
+              .map((r) => [r.sceneId, r.audioDataUrl])
+          );
+
+          if (audioMap.size > 0) {
+            setEpisodes((prev) =>
+              prev.map((ep) =>
+                ep.id === newEp.id
+                  ? {
+                      ...ep,
+                      scenes: ep.scenes.map((s) =>
+                        audioMap.has(s.id)
+                          ? { ...s, audioDataUrl: audioMap.get(s.id) }
+                          : s
+                      ),
+                    }
+                  : ep
+              )
+            );
           }
+        } catch {
+          // Continue playback with procedural SFX & ambient score even if TTS is skipped
         }
 
         setPipelineStep('complete');
+        setIsAudioMuted(false);
         setIsPlaying(true);
-        const doneMsg = `Researched & started playing "${newEp.title}" (${newEp.scenes.length} optimized chapters).`;
+        const doneMsg = `Researched & started audio-synced playback for "${newEp.title}" (${newEp.scenes.length} chapters + word-timed SFX).`;
         setGenerationStatus(doneMsg);
         setExportBanner(doneMsg);
       }
@@ -522,8 +623,18 @@ export default function RookStudioPage() {
         typeof canvas.captureStream === 'function';
 
       if (hasMediaRecorder) {
-        const stream = canvas.captureStream(30);
-        const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+        const videoStream = canvas.captureStream(30);
+        const audioTrack = !isAudioMuted
+          ? rookSoundEngine.getExportAudioTrack()
+          : null;
+        const combinedTracks = audioTrack
+          ? [...videoStream.getVideoTracks(), audioTrack]
+          : [...videoStream.getVideoTracks()];
+        const stream = new MediaStream(combinedTracks);
+
+        const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')
+          ? 'video/webm;codecs=vp9,opus'
+          : MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
           ? 'video/webm;codecs=vp9'
           : 'video/webm';
         const recorder = new MediaRecorder(stream, { mimeType });
@@ -1061,8 +1172,48 @@ export default function RookStudioPage() {
                 </button>
               </div>
 
-              {/* Clean Live Active Camera Rig, Lens & Timecode */}
+              {/* Clean Live Active Camera Rig, Audio Sync & Timecode */}
               <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-400">
+                <button
+                  type="button"
+                  onClick={() => setIsAudioMuted((m) => !m)}
+                  aria-label={
+                    isAudioMuted ? 'Unmute Voiceover & SFX' : 'Mute Voiceover & SFX'
+                  }
+                  className={`press-scale px-2.5 py-1 rounded-md border text-[11px] font-medium flex items-center gap-1 whitespace-nowrap shrink-0 transition-colors ${
+                    !isAudioMuted
+                      ? 'bg-[#D4FF00]/15 border-[#D4FF00]/50 text-[#D4FF00]'
+                      : 'bg-[#07080B] border-white/15 text-zinc-400 hover:text-white'
+                  }`}
+                >
+                  {isAudioMuted ? (
+                    <VolumeX className="w-3.5 h-3.5" />
+                  ) : (
+                    <Volume2 className="w-3.5 h-3.5" />
+                  )}
+                  <span>{isAudioMuted ? 'Audio Muted' : 'Audio & SFX'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setIsAmbientEnabled((a) => !a)}
+                  aria-label="Toggle Noir Ambient Score"
+                  className={`press-scale px-2.5 py-1 rounded-md border text-[11px] font-medium flex items-center gap-1 whitespace-nowrap shrink-0 transition-colors ${
+                    isAmbientEnabled && !isAudioMuted
+                      ? 'bg-sky-500/15 border-sky-400/40 text-sky-300'
+                      : 'bg-[#07080B] border-white/15 text-zinc-400 hover:text-white'
+                  }`}
+                >
+                  <Music className="w-3 h-3" />
+                  <span>{isAmbientEnabled ? 'Score Ducking ON' : 'Score OFF'}</span>
+                </button>
+
+                <span className="text-[11px] font-mono text-zinc-400">
+                  {activeCueLabel && isPlaying
+                    ? `Cue: ${activeCueLabel}`
+                    : `${audioCues.length} SFX cues`}
+                </span>
+                <span aria-hidden="true">·</span>
                 <span>
                   Shot {playbackState.activeSlot?.scene.sceneNumber || 1} of{' '}
                   {slots.length}

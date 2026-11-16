@@ -3,7 +3,9 @@
 import React, { useEffect, useRef } from 'react';
 import {
   BrandProfile,
+  FILM_LOOK_CATALOG,
   FINANCIAL_CHART_CATALOG,
+  parseNumericMetric,
   resolveSceneFinancialSeries,
   TimelinePlaybackState,
   TransitionType,
@@ -371,7 +373,44 @@ export function renderCompositeFrame(
       );
     }
 
-    // 2. Apply @byrook_tv Noir Forensic Vignette & Measured Contrast Scrim
+    // 2. Apply @byrook_tv Film Look Grade & Measured Contrast Scrim
+    const activeLook =
+      FILM_LOOK_CATALOG[brand.filmLook || 'noir-slate'] ||
+      FILM_LOOK_CATALOG['noir-slate'];
+
+    if (brand.filmLook === 'evidence-wall') {
+      // Tactile investigative cork/board red forensic connection threads & corner pins
+      ctx.save();
+      ctx.strokeStyle = activeLook.threadHex;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(width * 0.08, height * 0.22);
+      ctx.lineTo(width * 0.42, height * 0.14);
+      ctx.lineTo(width * 0.86, height * 0.28);
+      ctx.stroke();
+
+      // Pinned corner registration nodes
+      [
+        [width * 0.08, height * 0.22],
+        [width * 0.42, height * 0.14],
+        [width * 0.86, height * 0.28],
+      ].forEach(([px, py]) => {
+        ctx.fillStyle = '#EF4444';
+        ctx.beginPath();
+        ctx.arc(px, py, 3.5, 0, Math.PI * 2);
+        ctx.fill();
+      });
+      ctx.restore();
+    } else if (brand.filmLook === 'blueprint') {
+      // Precision engineering blueprint border ticks & schematic axes
+      ctx.save();
+      ctx.strokeStyle = activeLook.threadHex;
+      ctx.lineWidth = 1;
+      const m = 22;
+      ctx.strokeRect(m, m, width - m * 2, height - m * 2);
+      ctx.restore();
+    }
+
     const vignette = ctx.createRadialGradient(
       width / 2,
       height * 0.45,
@@ -380,7 +419,12 @@ export function renderCompositeFrame(
       height / 2,
       width * 0.78
     );
-    vignette.addColorStop(0, 'rgba(9, 13, 22, 0.08)');
+    vignette.addColorStop(
+      0,
+      brand.filmLook === 'evidence-wall'
+        ? 'rgba(22, 16, 12, 0.08)'
+        : 'rgba(9, 13, 22, 0.08)'
+    );
     vignette.addColorStop(
       1,
       `rgba(5, 8, 15, ${Math.min(0.92, brand.vignetteIntensity + 0.32)})`
@@ -395,6 +439,48 @@ export function renderCompositeFrame(
     bottomScrim.addColorStop(1, 'rgba(5, 8, 15, 0.94)');
     ctx.fillStyle = bottomScrim;
     ctx.fillRect(0, height * 0.52, width, height * 0.48);
+
+    // Word-Synced Forensic Stamp Slam (Moh4696/cinematic-skill: hits land on the spoken word)
+    if (
+      activeWord &&
+      activeWord.isHighlighted &&
+      activeWord.highlightTone === 'crimson'
+    ) {
+      const wordSpan = Math.max(0.15, activeWord.endSec - activeWord.startSec);
+      const localWordT = Math.max(
+        0,
+        Math.min(1, (clampedTimeSec - activeWord.startSec) / wordSpan)
+      );
+      const slamScale = 1.0 + Math.pow(1 - localWordT, 3) * 0.34;
+      const stampText = activeWord.cleanWord.toUpperCase();
+
+      ctx.save();
+      const stampX = aspectRatio === '9:16' ? width * 0.5 : width * 0.8;
+      const stampY = activeScene.showFinancialOverlay
+        ? height * 0.62
+        : height * 0.19;
+      ctx.translate(stampX, stampY);
+      ctx.rotate(-0.07);
+      ctx.scale(slamScale, slamScale);
+
+      const stampFontSize = Math.max(20, Math.round(height * 0.042));
+      ctx.font = `800 ${stampFontSize}px "JetBrains Mono", monospace`;
+      const tw = ctx.measureText(stampText).width;
+      const boxW = tw + 28;
+      const boxH = stampFontSize + 18;
+
+      ctx.fillStyle = 'rgba(127, 29, 29, 0.28)';
+      ctx.strokeStyle = activeLook.stampHex;
+      ctx.lineWidth = 2.5;
+      ctx.fillRect(-boxW / 2, -boxH / 2, boxW, boxH);
+      ctx.strokeRect(-boxW / 2, -boxH / 2, boxW, boxH);
+
+      ctx.fillStyle = activeLook.stampHex;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(stampText, 0, 1);
+      ctx.restore();
+    }
 
     // 3. Optional watermark only if explicitly enabled in Brand DNA settings (off by default)
     if (brand.watermarkEnabled) {
@@ -454,12 +540,32 @@ export function renderCompositeFrame(
       ctx.fillStyle = '#D4FF00';
       ctx.fillText(codeText, cardX + cardW - innerPadX - codeW, headerY);
 
-      // Key Figure Value
+      // Key Figure Value (Rolling Numeric Counter + Highlighter Swipe)
+      const parsedMetric = parseNumericMetric(activeScene.keyMetricValue || '$4.2M');
+      const rollProgress = Math.min(1, Math.max(0.25, sceneProgress * 2.2));
+      const renderedMetricValue = parsedMetric
+        ? `${parsedMetric.prefix}${(parsedMetric.targetNumber * rollProgress).toFixed(
+            parsedMetric.decimals
+          )}${parsedMetric.suffix}`
+        : activeScene.keyMetricValue || '$4.2M';
+
       const valueFontSize = Math.max(16, Math.round(cardH * 0.11));
       ctx.font = `700 ${valueFontSize}px "JetBrains Mono", monospace`;
+      const valW = ctx.measureText(renderedMetricValue).width;
+
+      // Animated Highlighter Swipe behind key figure
+      const swipeW = Math.min(valW + 8, (valW + 8) * rollProgress);
+      ctx.fillStyle = 'rgba(212, 255, 0, 0.16)';
+      ctx.fillRect(
+        cardX + innerPadX - 2,
+        headerY + Math.round(cardH * 0.11) - valueFontSize * 0.5,
+        swipeW,
+        valueFontSize + 2
+      );
+
       ctx.fillStyle = '#FFFFFF';
       ctx.fillText(
-        activeScene.keyMetricValue || '$4.2M',
+        renderedMetricValue,
         cardX + innerPadX,
         headerY + Math.round(cardH * 0.11)
       );
