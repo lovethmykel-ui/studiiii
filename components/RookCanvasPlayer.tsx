@@ -199,66 +199,40 @@ function renderSceneLayer(
   }
 }
 
-export default function RookCanvasPlayer({
-  scenes,
-  playbackState,
-  brand,
-  aspectRatio,
-  canvasRef,
-}: RookCanvasPlayerProps) {
-  const imageCacheRef = useRef<Map<string, HTMLImageElement>>(new Map());
-  const [imageLoadTick, setImageLoadTick] = React.useState(0);
+/**
+ * Renders a complete composite documentary frame (camera rig, transitions, FX,
+ * financial telemetry overlay, kinetic subtitles, and scrims) to a 2D canvas context.
+ */
+export function renderCompositeFrame(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  playbackState: TimelinePlaybackState,
+  brand: BrandProfile,
+  aspectRatio: '16:9' | '9:16',
+  imageCache: Map<string, HTMLImageElement>
+) {
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = brand.canvasBgHex;
+  ctx.fillRect(0, 0, width, height);
 
-  // Preload scene images into cache and trigger redraw on load
-  useEffect(() => {
-    scenes.forEach((scene) => {
-      if (!scene.imageUrl) return;
-      if (imageCacheRef.current.has(scene.imageUrl)) return;
-      const img = new window.Image();
-      if (!scene.imageUrl.startsWith('data:')) {
-        img.crossOrigin = 'anonymous';
-      }
-      img.onload = () => {
-        setImageLoadTick((v) => v + 1);
-      };
-      img.src = scene.imageUrl;
-      imageCacheRef.current.set(scene.imageUrl, img);
-    });
-  }, [scenes]);
+  const {
+    activeSlot,
+    previousSlot,
+    sceneProgress,
+    inTransition,
+    transitionProgress,
+    activeWord,
+    activePhrase,
+    clampedTimeSec,
+  } = playbackState;
 
-  // Render composite frame whenever playbackState, brand, aspectRatio, or loaded images update
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+  if (!activeSlot) return;
 
-    const width = canvas.width;
-    const height = canvas.height;
-
-    ctx.clearRect(0, 0, width, height);
-    ctx.fillStyle = brand.canvasBgHex;
-    ctx.fillRect(0, 0, width, height);
-
-    const {
-      activeSlot,
-      previousSlot,
-      sceneProgress,
-      inTransition,
-      transitionProgress,
-      activeWord,
-      activePhrase,
-      clampedTimeSec,
-    } = playbackState;
-
-    if (!activeSlot) return;
-
-    const activeScene = activeSlot.scene;
-    const activeImg = imageCacheRef.current.get(activeScene.imageUrl);
-    const prevScene = previousSlot?.scene;
-    const prevImg = prevScene
-      ? imageCacheRef.current.get(prevScene.imageUrl)
-      : undefined;
+  const activeScene = activeSlot.scene;
+  const activeImg = imageCache.get(activeScene.imageUrl);
+  const prevScene = previousSlot?.scene;
+  const prevImg = prevScene ? imageCache.get(prevScene.imageUrl) : undefined;
 
     // 1. Render Scene + Transition Choreography
     if (inTransition && prevScene) {
@@ -683,15 +657,60 @@ export default function RookCanvasPlayer({
       ctx.restore();
     }
 
-    // 6. Bottom progress bar hairline
-    const totalProgress =
-      playbackState.totalDurationSec > 0
-        ? playbackState.clampedTimeSec / playbackState.totalDurationSec
-        : 0;
-    ctx.fillStyle = 'rgba(56, 189, 248, 0.2)';
-    ctx.fillRect(0, height - 3, width, 3);
-    ctx.fillStyle = brand.primaryAccentHex;
-    ctx.fillRect(0, height - 3, width * totalProgress, 3);
+  // 6. Bottom progress bar hairline
+  const totalProgress =
+    playbackState.totalDurationSec > 0
+      ? playbackState.clampedTimeSec / playbackState.totalDurationSec
+      : 0;
+  ctx.fillStyle = 'rgba(56, 189, 248, 0.2)';
+  ctx.fillRect(0, height - 3, width, 3);
+  ctx.fillStyle = brand.primaryAccentHex;
+  ctx.fillRect(0, height - 3, width * totalProgress, 3);
+}
+
+export default function RookCanvasPlayer({
+  scenes,
+  playbackState,
+  brand,
+  aspectRatio,
+  canvasRef,
+}: RookCanvasPlayerProps) {
+  const imageCacheRef = useRef<Map<string, HTMLImageElement>>(new Map());
+  const [imageLoadTick, setImageLoadTick] = React.useState(0);
+
+  // Preload scene images into cache and trigger redraw on load
+  useEffect(() => {
+    scenes.forEach((scene) => {
+      if (!scene.imageUrl) return;
+      if (imageCacheRef.current.has(scene.imageUrl)) return;
+      const img = new window.Image();
+      if (!scene.imageUrl.startsWith('data:')) {
+        img.crossOrigin = 'anonymous';
+      }
+      img.onload = () => {
+        setImageLoadTick((v) => v + 1);
+      };
+      img.src = scene.imageUrl;
+      imageCacheRef.current.set(scene.imageUrl, img);
+    });
+  }, [scenes]);
+
+  // Render composite frame whenever playbackState, brand, aspectRatio, or loaded images update
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    renderCompositeFrame(
+      ctx,
+      canvas.width,
+      canvas.height,
+      playbackState,
+      brand,
+      aspectRatio,
+      imageCacheRef.current
+    );
   }, [playbackState, brand, aspectRatio, scenes, canvasRef, imageLoadTick]);
 
   return (

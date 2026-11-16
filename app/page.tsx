@@ -23,6 +23,7 @@ import RookCanvasPlayer from '@/components/RookCanvasPlayer';
 import TimelineScrubber from '@/components/TimelineScrubber';
 import SceneInspectorPanel from '@/components/SceneInspectorPanel';
 import BrandDnaPanel from '@/components/BrandDnaPanel';
+import EpisodeArchivePanel from '@/components/EpisodeArchivePanel';
 import {
   BookOpen,
   CheckCircle2,
@@ -805,66 +806,31 @@ export default function RookStudioPage() {
           />
         )}
 
-        {/* Archive / Episode Switcher Drawer when Selected */}
+        {/* Archive / Episode Switcher & Batch Export Drawer when Selected */}
         {activeTab === 'episodes' && (
-          <section className="bg-[#0D0F14] border border-white/10 rounded-xl p-5">
-            <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-white/10 mb-4">
-              <div>
-                <div className="text-xs text-[#D4FF00] font-medium">
-                  Multi-Shot Documentary Projects
-                </div>
-                <h2 className="text-lg font-bold text-white mt-0.5">
-                  @byrook_tv Production Archive ({episodes.length} Episodes)
-                </h2>
-              </div>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {episodes.map((ep) => {
-                const isCurrent = ep.id === activeEpisode.id;
-                return (
-                  <div
-                    key={ep.id}
-                    className={`p-4 rounded-xl border flex flex-col justify-between gap-3 ${
-                      isCurrent
-                        ? 'bg-[#161922] border-[#D4FF00]'
-                        : 'bg-[#080A0E] border-white/10'
-                    }`}
-                  >
-                    <div>
-                      <div className="flex items-center justify-between text-xs text-zinc-400">
-                        <span>{ep.createdAt}</span>
-                        <span className="font-mono text-[#D4FF00]">
-                          {ep.scenes.length} Shots · {ep.format}
-                        </span>
-                      </div>
-                      <h3 className="text-base font-bold text-white mt-1">
-                        {ep.title}
-                      </h3>
-                      <p className="text-xs text-zinc-400 mt-1">
-                        {ep.hookLine}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setActiveEpisodeId(ep.id);
-                        setSelectedSceneId(ep.scenes[0]?.id || '');
-                        setCurrentTimeSec(0.2);
-                        setActiveTab('studio');
-                      }}
-                      className={`press-scale py-2 px-3 rounded-lg text-xs font-semibold transition-colors ${
-                        isCurrent
-                          ? 'bg-[#D4FF00] text-black'
-                          : 'bg-white/10 text-white hover:bg-white/20'
-                      }`}
-                    >
-                      {isCurrent ? 'Loaded in Cinema Studio' : 'Load Project in Studio'}
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          </section>
+          <EpisodeArchivePanel
+            episodes={episodes}
+            activeEpisodeId={activeEpisode.id}
+            brand={brand}
+            onLoadEpisode={(ep) => {
+              setActiveEpisodeId(ep.id);
+              setSelectedSceneId(ep.scenes[0]?.id || '');
+              setCurrentTimeSec(0.2);
+              setActiveTab('studio');
+            }}
+            onBatchExportComplete={(exportedIds, zipFilename, entries) => {
+              setEpisodes((prev) =>
+                prev.map((ep) =>
+                  exportedIds.includes(ep.id)
+                    ? { ...ep, status: 'Exported' }
+                    : ep
+                )
+              );
+              setExportBanner(
+                `Batch Export complete: "${zipFilename}" contains ${entries.length} episodes (${entries.length * 2} .SRT & master .WebM files).`
+              );
+            }}
+          />
         )}
 
         {/* Higgsfield Motion & Transition Presets View when Selected */}

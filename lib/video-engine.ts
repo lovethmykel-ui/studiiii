@@ -1284,3 +1284,70 @@ export const INITIAL_ROOK_EPISODES: EpisodeProject[] = [
   },
 ];
 
+export interface BatchExportEntry {
+  episodeId: string;
+  title: string;
+  format: '16:9' | '9:16';
+  sceneCount: number;
+  durationSec: number;
+  baseSlug: string;
+  srtFilename: string;
+  srtContent: string;
+  videoFilename: string;
+}
+
+/**
+ * Normalizes an episode title into a filesystem-safe slug for ZIP export.
+ */
+export function slugifyEpisodeFilename(
+  title: string,
+  fallback = 'byrook-episode'
+): string {
+  const cleaned = title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 64);
+  return cleaned || fallback;
+}
+
+/**
+ * Builds deterministic, collision-free file pairs (.SRT + master video) for batch ZIP export.
+ */
+export function buildBatchExportManifest(
+  episodes: EpisodeProject[],
+  videoExt = 'webm'
+): BatchExportEntry[] {
+  const usedSlugs = new Set<string>();
+
+  return episodes.map((ep, idx) => {
+    const prefix = String(idx + 1).padStart(2, '0');
+    const rawSlug = slugifyEpisodeFilename(ep.title, `episode-${idx + 1}`);
+    let candidate = `${prefix}-${rawSlug}`;
+    let counter = 2;
+    while (usedSlugs.has(candidate)) {
+      candidate = `${prefix}-${rawSlug}-${counter}`;
+      counter++;
+    }
+    usedSlugs.add(candidate);
+
+    const totalDurationSec = ep.scenes.reduce(
+      (sum, sc) => sum + Math.max(1, sc.durationSec),
+      0
+    );
+
+    return {
+      episodeId: ep.id,
+      title: ep.title,
+      format: ep.format,
+      sceneCount: ep.scenes.length,
+      durationSec: totalDurationSec,
+      baseSlug: candidate,
+      srtFilename: `${candidate}.srt`,
+      srtContent: exportToSrt(ep.scenes, 5),
+      videoFilename: `${candidate}-master.${videoExt}`,
+    };
+  });
+}
+
+

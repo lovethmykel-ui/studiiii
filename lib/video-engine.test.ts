@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import JSZip from 'jszip';
 import {
   generateWordTimings,
   formatSrtTimestamp,
@@ -15,6 +16,8 @@ import {
   resolveSceneFinancialSeries,
   buildSceneBrollPrompt,
   buildFallbackNarrativeBeats,
+  slugifyEpisodeFilename,
+  buildBatchExportManifest,
   INITIAL_ROOK_EPISODES,
   ROOK_DEFAULT_BRAND,
   VideoScene,
@@ -168,6 +171,37 @@ test('buildSceneBrollPrompt and buildFallbackNarrativeBeats synthesize narration
   assert.ok(beats[1].emotionalTone.length > 0);
   assert.ok(beats[0].thematicFocus.includes('TIME TO DRAIN'));
 });
+
+test('slugifyEpisodeFilename and buildBatchExportManifest create collision-free SRT and video pairs in a valid ZIP', async () => {
+  assert.equal(
+    slugifyEpisodeFilename('Your Crypto Wallet Can Be Drained With ONE Click!'),
+    'your-crypto-wallet-can-be-drained-with-one-click'
+  );
+
+  const manifest = buildBatchExportManifest(INITIAL_ROOK_EPISODES, 'webm');
+  assert.equal(manifest.length, INITIAL_ROOK_EPISODES.length);
+  assert.ok(manifest[0].srtFilename.endsWith('.srt'));
+  assert.ok(manifest[0].videoFilename.endsWith('-master.webm'));
+  assert.notEqual(manifest[0].srtFilename, manifest[1].srtFilename);
+  assert.ok(manifest[0].srtContent.includes('00:00:00,050 -->'));
+
+  // Package into JSZip and verify round-trip extraction
+  const zip = new JSZip();
+  for (const entry of manifest) {
+    zip.file(entry.srtFilename, entry.srtContent);
+    zip.file(entry.videoFilename, new Uint8Array([0x1a, 0x45, 0xdf, 0xa3]));
+  }
+  const zipBuffer = await zip.generateAsync({ type: 'nodebuffer' });
+  const reloaded = await JSZip.loadAsync(zipBuffer);
+
+  for (const entry of manifest) {
+    const srtText = await reloaded.file(entry.srtFilename)?.async('string');
+    const videoBytes = await reloaded.file(entry.videoFilename)?.async('uint8array');
+    assert.ok(srtText && srtText.includes('-->'), `Expected valid SRT for ${entry.title}`);
+    assert.ok(videoBytes && videoBytes.length === 4, `Expected video bytes for ${entry.title}`);
+  }
+});
+
 
 
 
